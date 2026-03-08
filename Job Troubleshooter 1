@@ -1,0 +1,79 @@
+---
+- name: My Operational Playbook
+  hosts: all
+  gather_facts: false
+
+  vars:
+    asksage_api_url: "https://api.asksage.ai/your/endpoint"
+    asksage_api_key: "{{ vault_asksage_key }}"
+    email_recipient: "group@email.com"
+    task_outputs: []
+
+  tasks:
+
+    - name: Main workflow
+      block:
+
+        - name: Task 1 - Do something
+          command: echo "task 1 output"
+          register: task1_output
+
+        - name: Task 2 - Do something else
+          command: /usr/bin/some_script.sh
+          register: task2_output
+
+        - name: Task 3 - The task that might fail
+          command: /usr/bin/risky_operation.sh
+          register: task3_output
+
+      rescue:
+
+        - name: Build context from prior task outputs
+          set_fact:
+            failure_context: |
+              === PLAYBOOK FAILURE REPORT ===
+
+              Task 1 output:
+              {{ task1_output.stdout | default('Did not run or no output') }}
+
+              Task 2 output:
+              {{ task2_output.stdout | default('Did not run or no output') }}
+
+              Task 3 output (failed task):
+              STDOUT: {{ task3_output.stdout | default('No stdout') }}
+              STDERR: {{ task3_output.stderr | default('No stderr') }}
+              Return code: {{ task3_output.rc | default('Unknown') }}
+
+        - name: Query AskSage API for summary and fix recommendation
+          uri:
+            url: "{{ asksage_api_url }}"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ asksage_api_key }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              message: |
+                The following Ansible playbook has failed. Please provide:
+                1. A plain-English summary of what went wrong
+                2. Likely root causes
+                3. Recommended remediation steps
+
+                {{ failure_context }}
+            return_content: true
+          register: asksage_response
+
+        - name: Send failure summary email
+          mail:
+            host: "{{ smtp_host }}"
+            port: 25
+            to: "group@email.com"
+            subject: "Ansible Playbook Failure - {{ ansible_play_name }} on {{ inventory_hostname }}"
+            body: |
+              An Ansible playbook has failed and an AI-generated summary has been produced.
+
+              ===== RAW FAILURE CONTEXT =====
+              {{ failure_context }}
+
+              ===== AI SUMMARY & RECOMMENDED FIX =====
+              {{ asksage_response.json.response | default('No response received from AskSage') }}
