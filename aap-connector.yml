@@ -1,0 +1,185 @@
+swagger: "2.0"
+info:
+  title: AAP Job Launcher
+  description: >
+    Custom connector for Ansible Automation Platform (AAP).
+    Launches job templates with injected extra_vars and optionally
+    polls job status. Authenticate using a Bearer token generated
+    from AAP under User Settings > Tokens.
+  version: "1.0"
+host: "your-aap-host.domain.com"
+basePath: "/api/v2"
+schemes:
+  - https
+consumes:
+  - application/json
+produces:
+  - application/json
+
+securityDefinitions:
+  bearerAuth:
+    type: apiKey
+    in: header
+    name: Authorization
+    description: >
+      Enter your AAP token in the format: Bearer <your_token>
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  /job_templates/{template_id}/launch/:
+    post:
+      summary: Launch Job Template
+      description: >
+        Launches an AAP job template by ID. Injects account_username,
+        ad_action, and domain as extra_vars. The job template must have
+        "Prompt on launch" enabled for Variables, and survey variable
+        names must match these keys exactly.
+      operationId: LaunchJobTemplate
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          type: integer
+          description: The numeric ID of the AAP job template to launch.
+          x-ms-summary: Template ID
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: "#/definitions/LaunchRequest"
+      responses:
+        "201":
+          description: Job successfully created.
+          schema:
+            $ref: "#/definitions/LaunchResponse"
+        "400":
+          description: Bad request — check extra_vars keys or template configuration.
+        "403":
+          description: Forbidden — token user lacks Execute permission on this template.
+        "404":
+          description: Job template not found.
+
+  /jobs/{job_id}/:
+    get:
+      summary: Get Job Status
+      description: >
+        Polls the status of a previously launched job. Use the job ID
+        returned from the Launch action. Status values include:
+        pending, waiting, running, successful, failed, error, canceled.
+      operationId: GetJobStatus
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          type: integer
+          description: The numeric ID of the job returned by the Launch action.
+          x-ms-summary: Job ID
+      responses:
+        "200":
+          description: Job status retrieved successfully.
+          schema:
+            $ref: "#/definitions/JobStatusResponse"
+        "403":
+          description: Forbidden — token user lacks permission to view this job.
+        "404":
+          description: Job not found.
+
+definitions:
+
+  ExtraVars:
+    type: object
+    required:
+      - account_username
+      - ad_action
+      - domain
+    properties:
+      account_username:
+        type: string
+        description: The AD account username to act on.
+        x-ms-summary: Account Username
+        example: "jdoe"
+      ad_action:
+        type: string
+        description: The action to perform on the AD account.
+        x-ms-summary: AD Action
+        enum:
+          - enable
+          - disable
+          - unlock
+          - reset_password
+        example: "disable"
+      domain:
+        type: string
+        description: The Active Directory domain the account belongs to.
+        x-ms-summary: Domain
+        enum:
+          - corp.example.com
+          - subsidiary.example.com
+        example: "corp.example.com"
+
+  LaunchRequest:
+    type: object
+    required:
+      - extra_vars
+    properties:
+      extra_vars:
+        $ref: "#/definitions/ExtraVars"
+        description: >
+          Variables injected into the job template at launch time.
+          Keys must match the survey variable names defined on the template.
+
+  LaunchResponse:
+    type: object
+    properties:
+      job:
+        type: integer
+        description: The numeric ID of the created job. Use this to poll status.
+        x-ms-summary: Job ID
+        example: 1042
+      status:
+        type: string
+        description: Initial job status at time of launch.
+        x-ms-summary: Status
+        example: "pending"
+      url:
+        type: string
+        description: Relative URL of the created job resource in AAP.
+        x-ms-summary: Job URL
+        example: "/api/v2/jobs/1042/"
+
+  JobStatusResponse:
+    type: object
+    properties:
+      id:
+        type: integer
+        description: Job ID.
+        x-ms-summary: Job ID
+        example: 1042
+      status:
+        type: string
+        description: >
+          Current job status. One of: pending, waiting, running,
+          successful, failed, error, canceled.
+        x-ms-summary: Status
+        example: "successful"
+      started:
+        type: string
+        format: date-time
+        description: Timestamp when the job started running.
+        x-ms-summary: Started At
+      finished:
+        type: string
+        format: date-time
+        description: Timestamp when the job completed.
+        x-ms-summary: Finished At
+      failed:
+        type: boolean
+        description: True if the job ended in a failed or error state.
+        x-ms-summary: Failed
+      job_explanation:
+        type: string
+        description: Human-readable explanation if the job failed or was canceled.
+        x-ms-summary: Job Explanation
